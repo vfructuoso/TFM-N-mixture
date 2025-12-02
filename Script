@@ -264,8 +264,8 @@ obs_covs_list<-list(
 )
 
 modeloframePcount<-unmarkedFramePCount(y= y_data, siteCovs = site_data, obsCovs = obs_covs_list)
-summary(modelo_avu)
+
 
 #Modelo de poisson count model, ya que usamos datos de abundancia (conteos)
 modelo1 <- pcount(~ visibilidad + mes ~ log_distance + Porcentaje211, data=modeloframePcount)
-summary(modelo_avu1)
+summary(modelo1)
