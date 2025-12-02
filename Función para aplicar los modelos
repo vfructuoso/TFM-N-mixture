@@ -90,7 +90,7 @@ run_model <- function(species, meses, verbose = TRUE, eda = TRUE){
   
   if (eda) {
     
-    msg("\n=========== EDA AUTOMÁTICO (DataExplorer) ===========\n")
+    msg("\n=========== EDA ===========\n")
     
     # --- 1) EDA sobre la matriz de conteos ---
     msg("\n[EDA] Matriz de conteos (y_matrix_final)\n")
@@ -108,22 +108,13 @@ run_model <- function(species, meses, verbose = TRUE, eda = TRUE){
     print(introduce(obs_covs_final))
     plot_intro(obs_covs_final)
     plot_missing(obs_covs_final)
-    
-    # Categóricas: visibilidad, mes
-    vis_cols <- obs_covs_final %>% select(matches("visibilidad"))
-    
-    if(ncol(vis_cols) > 0) plot_bar(vis_cols)
-    
+   
     # --- 3) EDA sobre covariables de sitio ---
     msg("\n[EDA] Covariables de sitio (site_covs_final)\n")
     print(introduce(site_covs_final))
     plot_intro(site_covs_final)
     plot_missing(site_covs_final)
-    
-    # Continuas: distancia y porcentajes
-    cont_vars <- site_covs_final %>% select(-id_1x1)
-    suppressWarnings(plot_density(cont_vars))
-    
+        
     msg("\n=========== FIN DEL EDA ===========\n")
   }
   
