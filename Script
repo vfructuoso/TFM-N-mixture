@@ -1,0 +1,271 @@
+#====Librerías====
+
+library(tidyverse)
+library(lubridate)
+library(janitor)
+library(readxl)
+library(DataExplorer)
+library(unmarked)
+
+#====Carga de datos====
+
+aves_raw <- read_excel("ContactosCuadriculas2022.xlsx")
+habitat_raw <- read_excel("CuadriculasCorinePorcentaje.xlsx")
+distancias_raw <- read_excel("DistanciasCarreterasCentroideCuadriculas.xlsx", 
+                             col_types = c("numeric", "numeric", "skip", 
+                                           "skip", "skip", "skip", "skip", "skip", 
+                                           "text", "numeric", "skip", "skip", 
+                                           "skip", "numeric"))
+
+#====Dataset de aves====
+
+aves<-aves_raw %>%
+  clean_names() %>%  #Limpieza de formato para los nombres
+  #Pasar a los formatos de fecha
+  mutate(
+    date = ymd(date, quiet = TRUE),
+    time = hms::as_hms(time),
+    mes = month(date),
+    año = year(date)
+  )
+
+#Selección de las columnas de interés
+
+aves<-aves[,c(1,2,4,7,8,9,10,11,12,14,15,17,24,25,26,27,34,35,36,37,38,39,44,45,69,70,71,72)]
+
+#Corrección del formato
+
+colnames(aves)[9] <-"visibilidad"
+colnames(aves)[9]
+# Convertir la columna visibilidad en un factor ordenado
+aves <- aves %>%
+  mutate(
+    visibilidad = factor(visibilidad,
+                         levels = c("Mala 50-100 m",
+                                    "Regular 100-200 m",
+                                    "Buena < 1km",
+                                    "Excelente > 1km"),
+                         ordered = TRUE)
+  )
+levels(aves$visibilidad)
+table(aves$visibilidad)
+
+#====Filtro de especies====
+
+especie_objetivo= "Otis tarda"
+
+#====Agrupación de datos por cuadrícula y día====
+
+visitas_all_raw <- aves %>%
+  group_by(id_1x1, date) %>%
+  summarise(
+    visibilidad = names(sort(table(visibilidad), decreasing = TRUE))[1],
+    mes = names(sort(table(mes), decreasing = TRUE))[1] %>% as.integer(),
+    .groups = "drop"
+  ) %>%
+  arrange(id_1x1, date)
+
+contajes_especie <- aves %>%
+  filter(n_cientifi == especie_objetivo) %>% #Selección de la especie objetivo
+  group_by(id_1x1, date) %>% #Agrupar por cuadrícula y fecha
+  summarise(count = sum(numero_ind, na.rm = TRUE), .groups = "drop")
+
+cat("Número total de la especie seleccionada =",(sum(contajes_especie$count)))
+
+visitas_all <- visitas_all_raw %>%
+  left_join(contajes_especie, by = c("id_1x1", "date")) %>%
+  mutate(count = replace_na(count, 0))
+
+visitas_all <- visitas_all %>%
+  group_by(id_1x1) %>%
+  arrange(date) %>%
+  mutate(visita_id = row_number()) %>% #ASigna un identificador con el número de visitas
+  ungroup()
+
+head(visitas_all)
+
+#Algunas comprobaciones de los datos
+visitas_all_raw %>% 
+  count(id_1x1) %>%
+  summary()
+visitas_all_raw %>%
+  count(id_1x1, date) %>%
+  filter(n > 1)
+
+dias_totales <- aves %>% 
+  group_by(date) %>% 
+  summarize(n_especies = n_distinct(n_cientifi))
+
+dias_totales %>% filter(n_especies == 0)
+#====Creación de la matriz para unmarked====
+y_matrix <- visitas_all %>%
+  select(id_1x1, visita_id, count) %>%
+  pivot_wider(names_from = visita_id, values_from = count, names_prefix = "visit_") %>%
+  arrange(id_1x1)
+
+cat("número de cuadrículas totales",nrow(y_matrix))
+cat("número de individuos totales", sum(y_matrix[2:9], na.rm = TRUE))
+
+#====Variables de observación====
+
+obs_covs<- visitas_all %>%
+  select(id_1x1, visita_id, visibilidad, mes) %>%
+  pivot_wider(
+    names_from = visita_id,
+    values_from = c(visibilidad, mes),
+    names_glue = "{.value}_visit_{visita_id}"
+  ) %>%
+  arrange(id_1x1)
+
+#====Variables de hábitat====
+
+site_covs<- aves %>%
+  group_by(id_1x1) %>%
+  summarise(
+    n_visitas = n_distinct(date), #Número de visitas por cuadrícula
+    total_individuos = sum(ifelse(n_cientifi == especie_objetivo, numero_ind, 0), na.rm = TRUE), #Número de individuos por cuadrícula, de la especie objetivo
+    .groups = "drop")
+
+cat("Número de individuos en site_covs =", sum(site_covs$total_individuos))
+
+# Incorporar las variables ambientales
+habitat_grouped<-habitat_raw %>%
+  group_by(id, CODE_18) %>%
+  summarise(Porcentaje = sum(Porcentaje, na.rm =TRUE), .groups = "drop") %>%
+  pivot_wider(names_from = CODE_18, values_from =Porcentaje, names_prefix = "Porcentaje")
+
+# Combinar con distancias
+
+habitat_covs<-habitat_grouped %>%
+  left_join(distancias_raw, by = "id")
+
+# Unir covariables de sitio con habitat
+
+names(habitat_covs)[1] = "id_1x1"
+site_covs<-site_covs %>%
+  left_join(habitat_covs, by ="id_1x1")
+#Cambiar los NA de los % por ceros
+site_covs <- site_covs %>%
+  mutate(across(starts_with("Porcentaje"), ~replace_na(., 0)))
+
+#====Filtrado de cuadrículas====
+
+#Se filtran todas aquellas que tienen más de 3 visitas
+
+site_covs_valid<-site_covs %>%
+  filter(n_visitas >=3) %>%
+  pull(id_1x1)
+cat("Número de cuadrículas tras el filtrado:",length(site_covs_valid))
+
+#Filtro aplicado en los datasets
+
+y_matrix <- y_matrix %>% filter(id_1x1 %in% site_covs_valid)
+
+cat("número de cuadrículas totales",nrow(y_matrix))
+cat("número de individuos totales", sum(y_matrix[2:9], na.rm = TRUE))
+
+obs_covs <- obs_covs %>% filter(id_1x1 %in% site_covs_valid)
+site_covs <- site_covs %>% filter(id_1x1 %in% site_covs_valid)
+
+#====Creación del dataset final====
+
+full_matrix <- y_matrix %>%
+  left_join(obs_covs, by = "id_1x1") %>%
+  left_join(site_covs, by = "id_1x1")
+write.csv(full_matrix, "Dataset_Completo.csv", row.names = FALSE)
+
+#Cuadrículas finales
+
+unique(full_matrix$id_1x1)
+
+
+#====Análisis exploratorio====
+
+#====Covariables de sitio====
+site_covs_EDA<-site_covs %>%
+  select(-id_1x1, -n_visitas, -total_individuos,-AreaHACuad, -CODIGOC, -RuleID) #Eliminar columnas que no son de interés para el análisis
+
+create_report(site_covs_EDA)
+
+#====Covariables de observación====
+
+obs_covs_EDA<-obs_covs %>%
+  select(-id_1x1)
+
+plot_intro(obs_covs_EDA)
+
+plot_missing(obs_covs_EDA)
+
+visibilidad_cols <- obs_covs_EDA %>% select(starts_with("visibilidad"))
+plot_bar(visibilidad_cols)
+
+mes_cols <- obs_covs_EDA %>% select(starts_with("mes"))
+plot_bar(mes_cols, ncol = 8)
+
+#====Matriz de detección====
+
+y_matrix_EDA<-y_matrix %>%
+  select(-id_1x1)
+num_visitas<-rowSums(!is.na(y_matrix_EDA))
+
+hist(num_visitas, 
+     main="Distribución del Esfuerzo de Muestreo (N° de Visitas por Sitio)", 
+     xlab="Número de Visitas Realizadas", 
+     ylab="Frecuencia (N° de Sitios)",
+     breaks = seq(min(num_visitas) - 0.5, max(num_visitas) + 0.5, by = 1))
+
+#====Adaptación del dataset====
+
+visitas_1a4<-c("id_1x1", "visit_1","visit_2", "visit_3", "visit_4") #Selección de las 4 primeras visitas
+
+y_matrix_final<- y_matrix %>%
+  select(all_of(visitas_1a4))
+
+obs_cols<-c(
+  "id_1x1",
+  #Visibilidad
+  "visibilidad_visit_1", "visibilidad_visit_2", "visibilidad_visit_3","visibilidad_visit_4",
+  #Mes
+  "mes_visit_1", "mes_visit_2", "mes_visit_3","mes_visit_4"
+)
+
+obs_covs_final<-obs_covs %>%
+  select(all_of(obs_cols))
+
+site_covs_final<- site_covs %>%
+  mutate(log_distance = log(distance)) %>%
+  select(id_1x1, log_distance, Porcentaje211)
+create_report(y_matrix_final)
+create_report(site_covs_final)
+create_report(obs_covs_final)
+
+#====Aplicación del modelo N-mixture
+
+y_data<-y_matrix_final %>% select(-id_1x1)
+sum(y_data, na.rm = TRUE)
+
+obs_data<-obs_covs_final %>% select (-id_1x1)
+
+site_data <- site_covs_final %>% 
+  select(log_distance, Porcentaje211)
+
+#Hay que cambiar el formato de la obs_covs
+visita_cols_visibilidad <- paste0("visibilidad_visit_", 1:4)
+
+visita_cols_mes <- paste0("mes_visit_", 1:4)
+
+obs_covs_list<-list(
+  visibilidad= obs_covs_final %>%
+    select(all_of(visita_cols_visibilidad)) %>% 
+    as.data.frame(),
+  mes = obs_covs_final %>%
+    select(all_of(visita_cols_mes)) %>%
+    as.data.frame
+)
+
+modeloframePcount<-unmarkedFramePCount(y= y_data, siteCovs = site_data, obsCovs = obs_covs_list)
+summary(modelo_avu)
+
+#Modelo de poisson count model, ya que usamos datos de abundancia (conteos)
+modelo1 <- pcount(~ visibilidad + mes ~ log_distance + Porcentaje211, data=modeloframePcount)
+summary(modelo_avu1)
