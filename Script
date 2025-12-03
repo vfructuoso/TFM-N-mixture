@@ -249,7 +249,7 @@ obs_data<-obs_covs_final %>% select (-id_1x1)
 site_data <- site_covs_final %>% 
   select(log_distance, Porcentaje211)
 
-#Hay que cambiar el formato de la obs_covs
+#Cambiar el formato de la obs_covs
 visita_cols_visibilidad <- paste0("visibilidad_visit_", 1:4)
 
 visita_cols_mes <- paste0("mes_visit_", 1:4)
