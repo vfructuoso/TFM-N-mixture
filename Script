@@ -6,7 +6,7 @@ library(unmarked)
 library(DataExplorer)
 library(ggplot2)
 #### 1, Parámetros para el modelo ####
-especie_objetivo <- "Otis tarda"
+especie_objetivo <- "Tetrax tetrax"
 año_objetivo     <- 2023
 n_visitas_max    <- 4
 K_limit          <- 1000 #Alto para manejar correctamente bandos grandes
@@ -17,10 +17,12 @@ Contactos <- read.csv("ContactosConCuadriculas.csv")
 aves_limpio <- Contactos %>%
   mutate(
     fecha = as.Date(OBSERVAT_1),
+    mes = month(fecha),
     ID_lista_final = ifelse(!is.na(GROUP.IDEN) & GROUP.IDEN != "", GROUP.IDEN, SAMPLING.E),
     conteo_num = ifelse(OBSERVATIO == "X", 1, as.numeric(OBSERVATIO))
   ) %>%
   filter(year(fecha) == año_objetivo) %>%
+  filter(mes %in% c(3,4,5)) %>% #Filtro para los meses de reproducción de la especie
   distinct(ID_lista_final, SCIENTIFIC, .keep_all = TRUE)
 
 #Información del dataset inicial y los filtrados
@@ -129,6 +131,7 @@ site_covs_final <- site_covs_inicial %>%
   mutate(provincia = as.factor(provincia)) %>%
   mutate(across(all_of(variables_interes), scale)) %>%
   select(id_cuadric, provincia, all_of(variables_interes))
+
 #### 5. Análisis exploratorio #####
 #Análisis del dataset inicial
 create_report(Contactos, output_file="EDA_Datos_Originales.html")
@@ -144,24 +147,24 @@ umf <- unmarkedFramePCount(
   siteCovs = site_covs_final %>% select(-id_cuadric),
   obsCovs = obs_list
 )
-modelo <- pcount(~ duracion + protocolo + obs_n + hora
+modelo <- pcount(~ duracion + protocolo + obs_n + hora + fecha
                  ~ P_210 + P_260 + P_320 + distance_carretera + dist_rn, 
-                 data = umf, K = K_limit, mixture = "NB")
+                 data = umf, K = K_limit, mixture ="NB")
 summary(modelo)
 #Resultados y abundancia estimada
-abundancia_n_hat <- bup(ranef(modelo), stat="mean")
+abundancia_estimada <- bup(ranef(modelo), stat="mean")
 resultados_abundancia <- data.frame(
-  id_cuadric = site_covs_scaled$id_cuadric,
-  provincia  = site_covs_scaled$provincia,
+  id_cuadric = site_covs_final$id_cuadric,
+  provincia  = site_covs_final$provincia,
   Max_Obs    = apply(matriz_y_limpia, 1, max, na.rm=TRUE),
-  Estimado   = round(abundancia_n_hat, 2)
+  Estimado   = round(abundancia_estimada, 2)
 )
 
 resultados_abundancia <- resultados_abundancia %>% 
   arrange(desc(Estimado))
 head(resultados_abundancia, 10)
-# Ver la suma total de individuos estimados en las 79 cuadrículas
-total_estimado <- sum(abundancia_n_hat)
+# Ver la suma total de individuos estimados en las 30 cuadrículas
+total_estimado <- sum(abundancia_estimada)
 cat("El modelo estima un total de", round(total_estimado), "individuos en la zona de estudio.\n")
 
 # Comparar con el conteo máximo observado
@@ -175,28 +178,23 @@ ggplot(resultados_abundancia, aes(x = Max_Obs, y = Estimado)) +
        y = "Individuos estimados (N-mixture)") +
   theme_minimal()
 
-resumen_provincial <- resultados_abundancia %>%
-  group_by(provincia) %>%
-  summarise(Cuadriculas = n(), Total_Estimado = sum(Estimado), .groups = "drop")
-print(resumen_provincial)
-# Gráfico de abundancia por provincia
-ggplot(resultados_abundancia, aes(x = provincia, y = Estimado, fill = provincia)) +
-  geom_boxplot(alpha = 0.5) +
-  geom_jitter(width = 0.1, alpha = 0.5) +
-  labs(title = paste("Abundancia Estimada por Provincia -", especie_objetivo),
-       y = "Individuos estimados por cuadrícula") +
-  theme_minimal()
 #### 7. Validación del modelo ####
 fitstats <- function(m) {
-  f <- fitted(m)
-  y <- getY(m)
-  # Freeman-Tukey: sum((sqrt(y) - sqrt(f))^2)
-  ft <- sum((sqrt(y) - sqrt(f))^2, na.rm=TRUE)
-  return(c(FT=ft))
+  f <- fitted(m) #Valores esperados
+  y <- getY(m) #Falores observados
+  chisq <- sum((y - f)^2 / (f + 0.5), na.rm=TRUE)
+  return(c(chisq=chisq))
 }
-pb_test <- parboot(modelo, statistic=fitstats, nsim=5)
 
-print(pb_test)
+pb_ganga_ortega <- parboot(modelo_Pterocles_orientalis, statistic=fitstats, nsim=50)
+pb_sison <- parboot(modelo_Tetrax_tetrax, statistic=fitstats, nsim=50)
+pb_ganga_iberica <- parboot(modelo_Pterocles_alchata, statistic=fitstats, nsim=50)
+pb_avutarda <- parboot(modelo_Otis_tarda, statistic=fitstats, nsim=50)
+
+print(pb_ganga_ortega)
+print(pb_sison)
+print(pb_ganga_iberica)
+print(pb_avutarda)
 
 #### 8. Guardado ####
 saveRDS(modelo, file = paste0("modelo_", gsub(" ", "_", especie_objetivo), ".rds"))
