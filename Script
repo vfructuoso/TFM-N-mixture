@@ -18,8 +18,8 @@ aves_limpio <- Contactos %>%
   mutate(
     fecha = as.Date(OBSERVAT_1),
     mes = month(fecha),
-    ID_lista_final = ifelse(!is.na(GROUP.IDEN) & GROUP.IDEN != "", GROUP.IDEN, SAMPLING.E),
-    conteo_num = ifelse(OBSERVATIO == "X", 1, as.numeric(OBSERVATIO))
+    ID_lista_final = ifelse(!is.na(GROUP.IDEN) & GROUP.IDEN != "", GROUP.IDEN, SAMPLING.E), #Gestión de datos duplicados por grupos de observadores
+    conteo_num = ifelse(OBSERVATIO == "X", 1, as.numeric(OBSERVATIO)) #Nueva columna con el recuento de individuos, en formato numérico
   ) %>%
   filter(year(fecha) == año_objetivo) %>%
   filter(mes %in% c(3,4,5)) %>% #Filtro para los meses de reproducción de la especie
