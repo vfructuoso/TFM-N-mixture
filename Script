@@ -103,8 +103,9 @@ obs_list <- list(
 DistanciasRN <- read.csv("DistanciaRN.csv")
 DistanciasCarreteras <- read.csv("DistanciaCarreteras.csv")
 CuadriculasSIOSE <- read.csv("CuadriculasSIOSE.csv")
-#Extracción de la provincia
-referencia_provincias <- aves_limpio %>%
+
+#Extracción de la provincia (descartado)
+referencia_provincias <- aves_limpio %>% 
   select(id_cuadric, provincia = COUNTY) %>% #Cambio de nombre de COUNTY a "provincia"
   distinct(id_cuadric, .keep_all = TRUE)
 # Agrupar SIOSE
@@ -163,7 +164,6 @@ print(pb_modelo)
 abundancia_estimada <- bup(ranef(modelo), stat="mean")
 resultados_abundancia <- data.frame(
   id_cuadric = site_covs_final$id_cuadric,
-  provincia  = site_covs_final$provincia,
   Max_Obs    = apply(matriz_y_limpia, 1, max, na.rm=TRUE),
   Estimado   = round(abundancia_estimada, 2)
 )
