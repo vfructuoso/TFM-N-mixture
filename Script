@@ -89,7 +89,7 @@ obs_covs_wide <- visitas_final_filtrado %>%
     protocolo_n = as.numeric(as.factor(protocolo)) # Protocolo a factor numérico
   ) %>%
   select(id_cuadric, visita_id, duracion, observadores, hora_num, fecha_num, protocolo_n) %>%
-  pivot_wider(names_from = visita_id, values_from = 3:8, names_glue = "{.value}_v{visita_id}") %>%
+  pivot_wider(names_from = visita_id, values_from = 3:7, names_glue = "{.value}_v{visita_id}") %>%
   arrange(id_cuadric)
 #Lista de covariables
 obs_list <- list(
