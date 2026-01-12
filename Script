@@ -52,6 +52,7 @@ contajes_especie <- aves_limpio %>%
   group_by(id_cuadric, fecha) %>%
   summarise(count = sum(conteo_num, na.rm = TRUE), .groups = "drop")
 
+#Combinar datasets de contajes con las visitas y variables de observación estructuradas
 visitas_final_filtrado <- visitas_all_raw %>%
   left_join(contajes_especie, by = c("id_cuadric", "fecha")) %>%
   mutate(count = replace_na(count, 0)) %>% 
@@ -69,10 +70,10 @@ cat("INdividuos de", especie_objetivo, "que quedan tras el filtro de esfuerzo:",
 ##### 4.1. Matriz Y #####
 y_matrix <- visitas_final_filtrado %>%
   select(id_cuadric, visita_id, count) %>%
-  pivot_wider(names_from = visita_id, values_from = count, names_prefix = "visit_") %>%
+  pivot_wider(names_from = visita_id, values_from = count, names_prefix = "visit_") %>% #formato para unmarked
   arrange(id_cuadric)
 
-matriz_y_limpia <- as.matrix(y_matrix %>% select(starts_with("visit_")))
+matriz_y_limpia <- as.matrix(y_matrix %>% select(starts_with("visit_"))) #Mantener todas las columnas salvo la de ID
 
 #Comprobaciones de los datos de la matriz
 summary(as.vector(matriz_y_limpia))
@@ -89,9 +90,9 @@ obs_covs_wide <- visitas_final_filtrado %>%
     protocolo_n = as.numeric(as.factor(protocolo)) # Protocolo a factor numérico
   ) %>%
   select(id_cuadric, visita_id, duracion, observadores, hora_num, fecha_num, protocolo_n) %>%
-  pivot_wider(names_from = visita_id, values_from = 3:7, names_glue = "{.value}_v{visita_id}") %>%
+  pivot_wider(names_from = visita_id, values_from = 3:7, names_glue = "{.value}_v{visita_id}") %>% #formato para unmarked
   arrange(id_cuadric)
-#Lista de covariables
+#Lista de covariables y escalado
 obs_list <- list(
   duracion = scale(as.matrix(obs_covs_wide %>% select(starts_with("duracion_")))),
   obs_n = scale(as.matrix(obs_covs_wide %>% select(starts_with("observadores_")))),
@@ -110,10 +111,11 @@ referencia_provincias <- aves_limpio %>%
   distinct(id_cuadric, .keep_all = TRUE)
 # Agrupar SIOSE
 habitat_grouped <- CuadriculasSIOSE %>%
-  group_by(id_cuadric, CODIIGE) %>%
-  summarise(Porcentaje = sum(porcentaje, na.rm = TRUE), .groups = "drop") %>%
-  pivot_wider(names_from = CODIIGE, values_from = Porcentaje, names_prefix = "P_") %>%
-  mutate(across(starts_with("P_"), ~replace_na(., 0)))
+  group_by(id_cuadric, CODIIGE) %>% #Agrupar por cuadrícula e ID de SIOSE
+  summarise(Porcentaje = sum(porcentaje, na.rm = TRUE), .groups = "drop") %>% #Suma de porcentajes
+  pivot_wider(names_from = CODIIGE, values_from = Porcentaje, names_prefix = "P_") %>% #Formato para unmarked
+  mutate(across(starts_with("P_"), ~replace_na(., 0))) #Sustituir valores faltantes por ceros
+
 # Unión de datasets
 site_covs_inicial <- habitat_grouped %>%
   left_join(DistanciasCarreteras, by = "id_cuadric") %>%
@@ -122,13 +124,13 @@ site_covs_inicial <- habitat_grouped %>%
   left_join(referencia_provincias, by = "id_cuadric") %>% # Unión de la provincia extraída
   filter(id_cuadric %in% y_matrix$id_cuadric) %>%
   arrange(id_cuadric)
-# Escalado de datos y selección de variables de interes
+# Selección de variables de interes y escalado
 variables_interes <- c("P_210", "P_260", "P_320", "distance_carretera", "dist_rn")
 
 site_covs_final <- site_covs_inicial %>%
   mutate(provincia = as.factor(provincia)) %>%
   mutate(across(all_of(variables_interes), scale)) %>%
-  select(id_cuadric, provincia, all_of(variables_interes))
+  select(id_cuadric, provincia, all_of(variables_interes)) #Seleccionar por ID y provincia
 
 #### 5. Análisis exploratorio #####
 #Análisis del dataset inicial
@@ -136,8 +138,28 @@ create_report(Contactos, output_file="EDA_Datos_Originales.html")
 #Análisis de las variables de hábitat
 create_report(site_covs_inicial, output_file="EDA_site_covs.html")
 create_report(site_covs_final, output_file="EDA_site_covs_final.html")
+#Gráficos ggplot
+ggplot(site_covs_inicial, aes(x=P_210)) +
+  geom_histogram(color = "white", fill = "orange") +
+  labs(x = "Porcentaje", y = "Número de cuadrículas", title = "Distribución de porcentajes de Cultivo herbáceo")+
+  theme(
+    plot.title = element_text(size = 26),
+    axis.text.x = element_text(size = 20),
+    axis.title.x = element_text(size = 20),
+    axis.text.y = element_text(size = 20),
+    axis.title.y = element_text(size = 20))
 #Análisis de las variables de observación
 create_report(obs_covs_wide, output_file="EDA_obs_covs_wide.html")
+#Gráficos ggplot
+ggplot(obs_covs_wide, aes(x=duracion_v1)) + 
+  geom_histogram(color = "white", fill = "brown") +
+  labs(x = "Tiempo (minutos)", y = "Número de cuadrículas", title = "Distribución de duración de muestreo, primera visita")+
+  theme(
+    plot.title = element_text(size = 15),
+    axis.text.x = element_text(size = 20),
+    axis.title.x = element_text(size = 20),
+    axis.text.y = element_text(size = 20),
+    axis.title.y = element_text(size = 20))
 
 #### 6. Modelo unmarked ####
 umf <- unmarkedFramePCount(
@@ -180,7 +202,7 @@ total_observado <- sum(apply(y_matrix %>% select(starts_with("visit_")), 1, max,
 cat("El conteo máximo observado fue de", total_observado, "individuos.\n")
 ggplot(resultados_abundancia, aes(x = Max_Obs, y = Estimado)) +
   geom_point(color = "darkgreen", alpha = 0.6) +
-  geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "red") +
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "red") + #Línea de detección perfecta (intercepto 0 y pendiente 1)
   labs(title = "Abundancia Observada vs. Estimada por Cuadrícula",
        x = "Máximo de individuos observados",
        y = "Individuos estimados (N-mixture)") +
